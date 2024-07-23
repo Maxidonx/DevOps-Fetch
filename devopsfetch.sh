@@ -40,14 +40,19 @@ get_port_info() {
     if [ -z "$1" ]; then
         echo "Active and closed ports, services, and processes:"
         (
-            printf "%-10s %-10s %-20s %-20s\n" "Protocol" "PORT" "State" "Program Name"
-            lsof -i -P -n | grep LISTEN | awk '{split($9,a,":"); printf "%-10s %-10s %-20s %-20s\n", $1, a[length(a)], $10, $2 "/" $1}'
-            lsof -i -P -n | grep -v LISTEN | awk '{split($9,a,":"); printf "%-10s %-10s %-20s %-20s\n", $1, a[length(a)], $10, $2 "/" $1}'
-        ) | format_table
+            printf "+------------+---------------+-------------------------+--------------------+\n"
+            printf "| Protocol   | PORT          | State                   | Program Name       |\n"
+            printf "+------------+---------------+-------------------------+--------------------+\n"
+            lsof -i -P -n | grep LISTEN | awk '{split($9,a,":"); printf "| %-10s | %-13s | %-23s | %-18s |\n", $1, a[length(a)], $10, $2 "/" $1}'
+            lsof -i -P -n | grep -v LISTEN | awk '{split($9,a,":"); printf "| %-10s | %-13s | %-23s | %-18s |\n", $1, a[length(a)], $10, $2 "/" $1}'
+            printf "+------------+---------------+-------------------------+--------------------+\n"
+        )
     else
         echo "Information for port $1:"
         (
-            printf "%-10s %-10s %-20s %-20s\n" "Protocol" "PORT" "State" "Program Name"
+            printf "+------------+---------------+-------------------------+--------------------+\n"
+            printf "| Protocol   | PORT          | State                   | Program Name       |\n"
+            printf "+------------+---------------+-------------------------+--------------------+\n"
             ss -tuln | grep ":$1 " | while read -r line; do
                 protocol=$(echo "$line" | awk '{print $1}')
                 port=$(echo "$line" | awk '{split($4,a,":"); print a[length(a)]}')
@@ -60,9 +65,10 @@ get_port_info() {
                     program="N/A"
                 fi
 
-                printf "%-10s %-10s %-20s %-20s\n" "$protocol" "$port" "$state" "$program"
+                printf "| %-10s | %-13s | %-23s | %-18s |\n" "$protocol" "$port" "$state" "$program"
             done
-        ) | format_table
+            printf "+------------+---------------+-------------------------+--------------------+\n"
+        )
     fi
 }
 
@@ -71,16 +77,20 @@ get_docker_info() {
     if [ -z "$1" ]; then
         echo "Docker images:"
         (
-            printf "%-30s %-20s %-20s %-15s\n" "Repository" "Tag" "ID" "Size"
-            docker images --format "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | 
-            awk '{printf "%-30s %-20s %-20s %-15s\n", $1, $2, $3, $4}'
-        ) | format_table
+            printf "+------------------------------+----------------------+----------------------+--------------+\n"
+            printf "| Repository                   | Tag                  | ID                   | Size         |\n"
+            printf "+------------------------------+----------------------+----------------------+--------------+\n"
+            docker images --format "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | awk '{printf "| %-28s | %-20s | %-20s | %-12s |\n", $1, $2, $3, $4}'
+            printf "+------------------------------+----------------------+----------------------+--------------+\n"
+        )
         echo -e "\nDocker containers:"
         (
-            printf "%-20s %-30s %-20s %-30s\n" "Names" "Image" "Status" "Ports"
-            docker ps -a --format "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" | 
-            awk '{printf "%-20s %-30s %-20s %-30s\n", $1, $2, $3, $4}'
-        ) | format_table
+            printf "+--------------------+------------------------------+----------------------+------------------------------+\n"
+            printf "| Names              | Image                        | Status               | Ports                        |\n"
+            printf "+--------------------+------------------------------+----------------------+------------------------------+\n"
+            docker ps -a --format "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" | awk '{printf "| %-18s | %-28s | %-20s | %-28s |\n", $1, $2, $3, $4}'
+            printf "+--------------------+------------------------------+----------------------+------------------------------+\n"
+        )
     else
         echo "Information for container $1:"
         docker inspect "$1"
@@ -89,48 +99,43 @@ get_docker_info() {
 
 # Function to get Nginx information
 get_nginx_info() {
-    if [ -z "$1" ]; then
-        echo "Nginx domains and ports:"
-        (
-            printf "%-30s %-10s\n" "Domain" "Port"
-            grep -r -E 'server_name|listen' /etc/nginx/sites-enabled/ | awk '
-            {
-                file = $1; gsub(":$", "", file)
-                if ($2 == "server_name") {
-                    domain = $3; gsub(";", "", domain)
-                    port = "80"  # Default port if listen is not specified
-                }
-                if ($2 == "listen") {
-                    port = $3; gsub(";", "", port)
-                }
-                if (domain != "" && port != "") {
-                    printf "%-30s %-10s\n", domain, port
-                    domain = ""
-                    port = ""
-                }
-            }'
-        ) | format_table
-    else
-        echo "Configuration for domain $1:"
-        grep -r -A 20 "server_name $1" /etc/nginx/sites-enabled/ || echo "No server found for domain $1."
-    fi
+    echo "Server Domain                 Proxy                          Configuration File"
+    echo "+-----------------------------+------------------------------+---------------------------+"
+    echo "| Domain                      | Proxy                        | Configuration File        |"
+    echo "+-----------------------------+------------------------------+---------------------------+"
+
+    for conf_file in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
+        if [[ -f "$conf_file" ]]; then
+            domains=$(grep -oP '(?<=server_name\s)[^;]+' "$conf_file" | xargs)
+            proxies=$(grep -oP '(?<=proxy_pass\s)[^;]+' "$conf_file" | xargs)
+            for domain in $domains; do
+                for proxy in $proxies; do
+                    printf "| %-27s | %-28s | %-25s |\n" "$domain" "$proxy" "$conf_file"
+                done
+            done
+        fi
+    done
+    echo "+-----------------------------+------------------------------+---------------------------+"
 }
 
-# Function to get user information
+# Function to display user activity logs
 get_user_info() {
     if [ -z "$1" ]; then
         echo "Regular users and last login times:"
         (
-            printf "%-15s %-12s %-8s %-15s\n" "User" "Date" "Time" "Host"
+            printf "+-----------------+----------------+----------+-----------------+\n"
+            printf "| User            | Date           | Time     | Host            |\n"
+            printf "+-----------------+----------------+----------+-----------------+\n"
             cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 != 65534 {print $1}' | while read -r user; do
                 last_login=$(last "$user" -1 2>/dev/null | awk 'NR==1 {print $4, $5, $3}')
                 if [ -n "$last_login" ]; then
-                    printf "%-15s %-12s %-8s %-15s\n" "$user" $(echo "$last_login" | awk '{print $1, $2, $3}')
+                    printf "| %-15s | %-14s | %-8s | %-15s |\n" "$user" $(echo "$last_login" | awk '{print $1, $2, $3}')
                 else
-                    printf "%-15s %-12s %-8s %-15s\n" "$user" "Never logged in" "" ""
+                    printf "| %-15s | %-14s | %-8s | %-15s |\n" "$user" "Never logged in" "" ""
                 fi
             done
-        ) | format_table
+            printf "+-----------------+----------------+----------+-----------------+\n"
+        )
     else
         echo "Information for user $1:"
         if id "$1" >/dev/null 2>&1; then
@@ -147,6 +152,7 @@ get_user_info() {
     fi
 }
 
+# Function to display system logs from a given date range
 get_time_range_info() {
     if [ -z "$1" ]; then
         echo "Please provide a start date (YYYY-MM-DD)."
@@ -170,46 +176,46 @@ get_time_range_info() {
     fi
 
     echo "Displaying system logs from $start_date 00:00:00 to $end_date 23:59:59:"
+    (
+        printf "+---------------------+---------------------+--------------------------------------------+\n"
+        printf "| Date                | Time                | Message                                    |\n"
+        printf "+---------------------+---------------------+--------------------------------------------+\n"
+        journalctl --since="$start_date 00:00:00" --until="$end_date 23:59:59" | while read -r line; do
+            # Extract date, time, and message
+            log_date=$(echo "$line" | awk '{print $1}')
+            log_time=$(echo "$line" | awk '{print $2}')
+            message=$(echo "$line" | cut -d' ' -f3-)
 
-    journalctl --since="$start_date 00:00:00" --until="$end_date 23:59:59" | while read -r line; do
-        echo "$line"
-    done
+            # Format and print the log entry
+            printf "| %-19s | %-19s | %-40s |\n" "$log_date" "$log_time" "$message"
+        done
+        printf "+---------------------+---------------------+--------------------------------------------+\n"
+    )
 }
 
-# Function to format output as a table
-format_table() {
-    column -t -s $'\t'
-}
 
-# Main function to handle command-line arguments
-main() {
-    log_activity "DevOpsFetch executed with arguments: $*"
-
-    case "$1" in
-        -p|--port)
-            get_port_info "$2"
-            ;;
-        -d|--docker)
-            get_docker_info "$2"
-            ;;
-        -n|--nginx)
-            get_nginx_info "$2"
-            ;;
-        -u|--users)
-            get_user_info "$2"
-            ;;
-        -t|--time)
-            get_time_range_info "$2" "$3"
-            ;;
-        -h|--help)
-            display_help
-            ;;
-        *)
-            echo "Invalid option. Use -h or --help for usage information."
-            exit 1
-            ;;
-    esac
-}
-
-# Call the main function with all script arguments
-main "$@"
+# Main script logic
+case "$1" in
+    -p|--port)
+        get_port_info "$2"
+        ;;
+    -d|--docker)
+        get_docker_info "$2"
+        ;;
+    -n|--nginx)
+        get_nginx_info "$2"
+        ;;
+    -u|--users)
+        get_user_info "$2"
+        ;;
+    -t|--time)
+        get_time_range_info "$2" "$3"
+        ;;
+    -h|--help)
+        display_help
+        ;;
+    *)
+        echo "Invalid option. Use -h or --help for usage information."
+        exit 1
+        ;;
+esac
