@@ -1,28 +1,47 @@
 #!/bin/bash
 
-echo "Installing dependencies..."
+set -e
 
-# Update and install dependencies
-apt-get update && apt-get install -y net-tools nginx docker.io
+# Uninstall any conflicting packages
+sudo apt-get remove containerd -y
+sudo apt-get purge containerd -y
 
-# Install Docker Compose
-echo "Installing Docker Compose..."
-sudo apt-get install -y docker-compose
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y nginx curl
 
+# Set up Docker’s official GPG key
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-# Create log file and set permissions
-echo "Setting up log file..."
-touch /var/log/devopsfetch.log
-chmod 644 /var/log/devopsfetch.log
+# Set up the Docker repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Copy the service file
-echo "Copying the systemd service file..."
-cp devopsfetch.service /etc/systemd/system/
+# Install Docker Engine
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+
+# Copy devopsfetch script to /usr/local/bin
+sudo cp devopsfetch.sh /usr/local/bin/devopsfetch
+sudo chmod +x /usr/local/bin/devopsfetch
+
+# Set up systemd service
+cat << EOF | sudo tee /etc/systemd/system/devopsfetch.service
+[Unit]
+Description=DevOpsFetch Monitoring Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/devopsfetch -t "1 hour ago"
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 # Enable and start the service
-echo "Enabling and starting the devopsfetch service..."
-systemctl daemon-reload
-systemctl enable devopsfetch
-systemctl start devopsfetch
+sudo systemctl daemon-reload
+sudo systemctl enable devopsfetch.service
+sudo systemctl start devopsfetch.service
 
-echo "Installation completed. devopsfetch is now running."
+echo "DevOpsFetch has been installed and the monitoring service has been started."

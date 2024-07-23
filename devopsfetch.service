@@ -3,12 +3,13 @@ Description=devopsfetch Service
 After=network.target
 
 [Service]
-ExecStart=/path/to/devopsfetch.sh
-Restart=always
+ExecStart=/usr/local/bin/devopsfetch
+Restart=on-failure
+RestartSec=30s
 User=root
 Environment=PATH=/usr/bin:/usr/local/bin
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=devopsfetch
 
 [Install]

@@ -1,164 +1,250 @@
 #!/bin/bash
 
-# Help function to display usage instructions
-show_help() {
-    echo "Usage: $0 [option] [argument]"
+# Function to display help information
+display_help() {
+    echo "Usage: devopsfetch [OPTION]..."
+    echo "Retrieve and display system information"
     echo "Options:"
-    echo "  -p, --port [port_number]        Display all active ports or detailed info about a specific port."
-    echo "  -d, --docker [container]        List all Docker images and containers or detailed info about a specific container."
-    echo "  -n, --nginx [domain]            Display Nginx domains or detailed info about a specific domain."
-    echo "  -u, --users [username]          List all users or detailed info about a specific user."
-    echo "  -t, --time [start_time] [end_time]  Display activities within a specified time range. If only start_time is provided, shows activities for that day."
-    echo "  -h, --help                      Show this help message and exit."
+    echo "  -p, --port [PORT]     Display active ports or specific port info"
+    echo "  -d, --docker [NAME]   Display Docker images/containers or specific container info"
+    echo "  -n, --nginx [DOMAIN]  Display Nginx domains or specific domain config"
+    echo "  -u, --users [USER]    Display user logins or specific user info"
+    echo "  -t, --time [START] [END]  Display activities within a specified time range"
+    echo "  -h, --help            Display this help message"
 }
 
-# Logging function
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> /var/log/devopsfetch.log
+# Function to log activities to a file
+log_activity() {
+    local log_file="/tmp/devopsfetch.log"
+    local max_size=$((10 * 1024 * 1024))  # 10 MB
+
+    # Create log file if it doesn't exist
+    if [ ! -f "$log_file" ]; then
+        touch "$log_file"
+        chmod 644 "$log_file"
+    fi
+
+    # Rotate log file if it exceeds max size
+    if [ "$(stat -c %s "$log_file")" -gt "$max_size" ]; then
+        mv "$log_file" "${log_file}.old"
+        touch "$log_file"
+        chmod 644 "$log_file"
+    fi
+
+    # Append log entry
+    echo "$(date): $1" >> "$log_file"
 }
 
-# Get all active ports
-get_active_ports() {
-    log_message "Fetching active ports"
-    echo -e "PROTO\tLOCAL ADDRESS\t\t\tFOREIGN ADDRESS\t\t\tSTATE"
-    ss -tuln | awk 'NR>1 {printf "%-7s %-30s %-30s %-15s\n", $1, $4, $5, $6}'
-}
-
-# Get detailed information for a specific port
+# Function to get port information
 get_port_info() {
-    log_message "Fetching info for port $1"
-    echo -e "PROTO\tLOCAL ADDRESS\t\t\tFOREIGN ADDRESS\t\t\tSTATE"
-    ss -tuln | grep ":$1 " | awk '{printf "%-7s %-30s %-30s %-15s\n", $1, $4, $5, $6}'
+    if [ -z "$1" ]; then
+        echo "Active and closed ports, services, and processes:"
+        (
+            printf "%-10s %-10s %-20s %-20s\n" "Protocol" "PORT" "State" "Program Name"
+            lsof -i -P -n | grep LISTEN | awk '{split($9,a,":"); printf "%-10s %-10s %-20s %-20s\n", $1, a[length(a)], $10, $2 "/" $1}'
+            lsof -i -P -n | grep -v LISTEN | awk '{split($9,a,":"); printf "%-10s %-10s %-20s %-20s\n", $1, a[length(a)], $10, $2 "/" $1}'
+        ) | format_table
+    else
+        echo "Information for port $1:"
+        (
+            printf "%-10s %-10s %-20s %-20s\n" "Protocol" "PORT" "State" "Program Name"
+            ss -tuln | grep ":$1 " | while read -r line; do
+                protocol=$(echo "$line" | awk '{print $1}')
+                port=$(echo "$line" | awk '{split($4,a,":"); print a[length(a)]}')
+                state=$(echo "$line" | awk '{print $2}')
+
+                pid=$(lsof -i :$1 -sTCP:LISTEN -t -n -P 2>/dev/null)
+                if [ -n "$pid" ]; then
+                    program=$(ps -o comm= -p "$pid")
+                else
+                    program="N/A"
+                fi
+
+                printf "%-10s %-10s %-20s %-20s\n" "$protocol" "$port" "$state" "$program"
+            done
+        ) | format_table
+    fi
 }
 
-# List all Docker images
-get_docker_images() {
-    log_message "Listing Docker images"
-    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}"
+# Function to get Docker information
+get_docker_info() {
+    if [ -z "$1" ]; then
+        echo "Docker images:"
+        (
+            printf "%-30s %-20s %-20s %-15s\n" "Repository" "Tag" "ID" "Size"
+            docker images --format "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | 
+            awk '{printf "%-30s %-20s %-20s %-15s\n", $1, $2, $3, $4}'
+        ) | format_table
+        echo -e "\nDocker containers:"
+        (
+            printf "%-20s %-30s %-20s %-30s\n" "Names" "Image" "Status" "Ports"
+            docker ps -a --format "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" | 
+            awk '{printf "%-20s %-30s %-20s %-30s\n", $1, $2, $3, $4}'
+        ) | format_table
+    else
+        echo "Information for container $1:"
+        docker inspect "$1"
+    fi
 }
 
-# Get detailed information about a specific Docker container
-get_docker_container_info() {
-    log_message "Fetching Docker container info for $1"
-    docker inspect "$1"
+# Function to get Nginx information
+get_nginx_info() {
+    if [ -z "$1" ]; then
+        echo "Nginx domains and ports:"
+        (
+            printf "%-30s %-10s\n" "Domain" "Port"
+            grep -r -E 'server_name|listen' /etc/nginx/sites-enabled/ | awk '
+            {
+                file = $1; gsub(":$", "", file)
+                if ($2 == "server_name") {
+                    domain = $3; gsub(";", "", domain)
+                    port = "80"  # Default port if listen is not specified
+                }
+                if ($2 == "listen") {
+                    port = $3; gsub(";", "", port)
+                }
+                if (domain != "" && port != "") {
+                    printf "%-30s %-10s\n", domain, port
+                    domain = ""
+                    port = ""
+                }
+            }'
+        ) | format_table
+    else
+        echo "Configuration for domain $1:"
+        grep -r -A 20 "server_name $1" /etc/nginx/sites-enabled/ || echo "No server found for domain $1."
+    fi
 }
 
-# List all Nginx domains and their ports
-get_nginx_domains() {
-    log_message "Fetching Nginx domains"
-    echo -e "FILE\t\tSERVER NAME"
-    grep -r 'server_name' /etc/nginx/sites-enabled/ | awk -F: '{print $1 "\t" $2}'
-}
-
-# Get detailed information for a specific Nginx domain
-get_nginx_domain_info() {
-    log_message "Fetching Nginx domain info for $1"
-    cat "/etc/nginx/sites-available/$1"
-}
-
-# List all users and their last login times
-get_users() {
-    log_message "Listing users and last login times"
-    echo -e "USERNAME\tFROM\tLOGIN TIME\tDURATION\tIP ADDRESS"
-    last | awk '{printf "%-15s %-20s %-20s %-20s %-20s\n", $1, $3, $4, $5, $7}'
-}
-
-# Get detailed information about a specific user
+# Function to get user information
 get_user_info() {
-    log_message "Fetching user info for $1"
-    getent passwd "$1"
-    last -F "$1"
+    if [ -z "$1" ]; then
+        echo "Regular users and last login times:"
+        (
+            printf "%-15s %-12s %-8s %-15s\n" "User" "Date" "Time" "Host"
+            cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 != 65534 {print $1}' | while read -r user; do
+                last_login=$(last "$user" -1 2>/dev/null | awk 'NR==1 {print $4, $5, $3}')
+                if [ -n "$last_login" ]; then
+                    printf "%-15s %-12s %-8s %-15s\n" "$user" $(echo "$last_login" | awk '{print $1, $2, $3}')
+                else
+                    printf "%-15s %-12s %-8s %-15s\n" "$user" "Never logged in" "" ""
+                fi
+            done
+        ) | format_table
+    else
+        echo "Information for user $1:"
+        if id "$1" >/dev/null 2>&1; then
+            if [ "$(id -u "$1")" -ge 1000 ] && [ "$(id -u "$1")" -ne 65534 ]; then
+                id "$1"
+                echo "Last login:"
+                last "$1" -1 | head -n 1
+            else
+                echo "This is a system user, not a regular user."
+            fi
+        else
+            echo "User $1 does not exist."
+        fi
+    fi
 }
 
-# Function to get activities within a specified time range
-get_time_range_activities() {
-    log_message "Fetching activities for time range: $1 to $2"
+# Function to get time range information
+get_time_range_info() {
+    # Check if a start date is provided
+    if [ -z "$1" ]; then
+        echo "Please provide a start date (YYYY-MM-DD)."
+        return 1
+    fi
 
-    # Convert dates to seconds since epoch for comparison
-    start_date=$(date -d "$1" +%s)
-    end_date=$(date -d "$2" +%s)
-
-    # Check if start date is valid
-    if [[ $? -ne 0 ]]; then
+    # Set the start date
+    start_date=$(date -d "$1" +%Y-%m-%d 2>/dev/null)
+    if [ -z "$start_date" ]; then
         echo "Invalid start date: $1"
         return 1
     fi
-
-    # Check if end date is valid
-    if [[ $? -ne 0 ]]; then
-        echo "Invalid end date: $2"
-        return 1
+    
+    # Default end date to today if not provided
+    if [ -n "$2" ]; then
+        end_date=$(date -d "$2" +%Y-%m-%d 2>/dev/null)
+        if [ -z "$end_date" ]; then
+            echo "Invalid end date: $2"
+            return 1
+        fi
+    else
+        end_date=$(date +%Y-%m-%d)
     fi
+    
+    echo "Activities from $start_date to $end_date:"
 
-    # Ensure end_date is not before start_date
-    if ((end_date < start_date)); then
-        echo "End date must be after start date."
-        return 1
-    fi
-
-    echo -e "USERNAME\tFROM\tLOGIN TIME\tDURATION\tIP ADDRESS"
-    last -F | awk -v start="$start_date" -v end="$end_date" '
-    BEGIN {FS=" "; OFS="\t"}
+    # Fetch activities within the date range
+    activities=$(last -F | awk -v start="$start_date" -v end="$end_date" '
+    BEGIN {
+        FS=" "; OFS="\t"
+        month_map["Jan"]="01"; month_map["Feb"]="02"; month_map["Mar"]="03"; month_map["Apr"]="04"; month_map["May"]="05"; month_map["Jun"]="06";
+        month_map["Jul"]="07"; month_map["Aug"]="08"; month_map["Sep"]="09"; month_map["Oct"]="10"; month_map["Nov"]="11"; month_map["Dec"]="12";
+        count = 0
+    }
     {
-        log_date = mktime(substr($4,7,4)" "substr($4,1,3)" "substr($4,4,2)" "substr($5,1,2)" "substr($5,4,2)" "substr($5,7,2))
+        # Construct log date in YYYY-MM-DD format
+        log_date = $7 "-" month_map[$5] "-" $6
+
+        # Compare log date with start and end dates
         if (log_date >= start && log_date <= end) {
-            printf "%s\t%s\t%s %s\t%s\t%s\n", $1, $3, $4, $5, $6, $7
+            printf "%-15s %-20s %-20s %-20s %-20s\n", $1, $3, $4, $5 " " $6 " " $7, $8
+            count++
         }
-    }'
+    }
+    END { 
+        print count > "/dev/stderr"
+        if (count == 0) {
+            exit 1
+        }
+    }')
+
+    # Capture activity count from stderr
+    activity_count=$(echo "$activities" | tail -n 1)
+
+    # Remove the last line which contains the count
+    activities=$(echo "$activities" | sed '$d')
+
+    if [ -z "$activity_count" ] || [ "$activity_count" -eq 0 ]; then
+        echo "No activities found in the specified time range."
+    else
+        echo "Activity count: $activity_count"
+        echo "$activities"
+    fi
 }
 
-# Main function to parse arguments and call appropriate functions
+# Function to format output as a table
+format_table() {
+    column -t -s $'\t'
+}
+
+# Main function to handle command-line arguments
 main() {
+    log_activity "DevOpsFetch executed with arguments: $*"
+
     case "$1" in
         -p|--port)
-            if [ -z "$2" ]; then
-                get_active_ports
-            else
-                get_port_info "$2"
-            fi
+            get_port_info "$2"
             ;;
         -d|--docker)
-            if [ -z "$2" ]; then
-                get_docker_images
-            else
-                get_docker_container_info "$2"
-            fi
+            get_docker_info "$2"
             ;;
         -n|--nginx)
-            if [ -z "$2" ]; then
-                get_nginx_domains
-            else
-                get_nginx_domain_info "$2"
-            fi
+            get_nginx_info "$2"
             ;;
         -u|--users)
-            if [ -z "$2" ]; then
-                get_users
-            else
-                get_user_info "$2"
-            fi
+            get_user_info "$2"
             ;;
         -t|--time)
-            if [ -z "$2" ]; then
-                echo "Error: Time range is required"
-                show_help
-                exit 1
-            else
-                start_time=$2
-                if [ -n "$3" ]; then
-                    end_time=$3
-                else
-                    end_time=$(date '+%Y-%m-%d')
-                fi
-                get_time_range_activities "$start_time" "$end_time"
-            fi
+            get_time_range_info "$2" "$3"
             ;;
         -h|--help)
-            show_help
+            display_help
             ;;
         *)
-            echo "Invalid option: $1"
-            show_help
+            echo "Invalid option. Use -h or --help for usage information."
+            exit 1
             ;;
     esac
 }
