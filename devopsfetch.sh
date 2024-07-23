@@ -147,22 +147,18 @@ get_user_info() {
     fi
 }
 
-# Function to get time range information
 get_time_range_info() {
-    # Check if a start date is provided
     if [ -z "$1" ]; then
         echo "Please provide a start date (YYYY-MM-DD)."
         return 1
     fi
 
-    # Set the start date
     start_date=$(date -d "$1" +%Y-%m-%d 2>/dev/null)
     if [ -z "$start_date" ]; then
         echo "Invalid start date: $1"
         return 1
     fi
-    
-    # Default end date to today if not provided
+
     if [ -n "$2" ]; then
         end_date=$(date -d "$2" +%Y-%m-%d 2>/dev/null)
         if [ -z "$end_date" ]; then
@@ -172,46 +168,12 @@ get_time_range_info() {
     else
         end_date=$(date +%Y-%m-%d)
     fi
-    
-    echo "Activities from $start_date to $end_date:"
 
-    # Fetch activities within the date range
-    activities=$(last -F | awk -v start="$start_date" -v end="$end_date" '
-    BEGIN {
-        FS=" "; OFS="\t"
-        month_map["Jan"]="01"; month_map["Feb"]="02"; month_map["Mar"]="03"; month_map["Apr"]="04"; month_map["May"]="05"; month_map["Jun"]="06";
-        month_map["Jul"]="07"; month_map["Aug"]="08"; month_map["Sep"]="09"; month_map["Oct"]="10"; month_map["Nov"]="11"; month_map["Dec"]="12";
-        count = 0
-    }
-    {
-        # Construct log date in YYYY-MM-DD format
-        log_date = $7 "-" month_map[$5] "-" $6
+    echo "Displaying system logs from $start_date 00:00:00 to $end_date 23:59:59:"
 
-        # Compare log date with start and end dates
-        if (log_date >= start && log_date <= end) {
-            printf "%-15s %-20s %-20s %-20s %-20s\n", $1, $3, $4, $5 " " $6 " " $7, $8
-            count++
-        }
-    }
-    END { 
-        print count > "/dev/stderr"
-        if (count == 0) {
-            exit 1
-        }
-    }')
-
-    # Capture activity count from stderr
-    activity_count=$(echo "$activities" | tail -n 1)
-
-    # Remove the last line which contains the count
-    activities=$(echo "$activities" | sed '$d')
-
-    if [ -z "$activity_count" ] || [ "$activity_count" -eq 0 ]; then
-        echo "No activities found in the specified time range."
-    else
-        echo "Activity count: $activity_count"
-        echo "$activities"
-    fi
+    journalctl --since="$start_date 00:00:00" --until="$end_date 23:59:59" | while read -r line; do
+        echo "$line"
+    done
 }
 
 # Function to format output as a table
