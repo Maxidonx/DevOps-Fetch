@@ -4,12 +4,12 @@
 show_help() {
     echo "Usage: $0 [option] [argument]"
     echo "Options:"
-    echo "  -p, --port [port_number]     Display all active ports or detailed info about a specific port."
-    echo "  -d, --docker [container]     List all Docker images and containers or detailed info about a specific container."
-    echo "  -n, --nginx [domain]         Display Nginx domains or detailed info about a specific domain."
-    echo "  -u, --users [username]       List all users or detailed info about a specific user."
+    echo "  -p, --port [port_number]        Display all active ports or detailed info about a specific port."
+    echo "  -d, --docker [container]        List all Docker images and containers or detailed info about a specific container."
+    echo "  -n, --nginx [domain]            Display Nginx domains or detailed info about a specific domain."
+    echo "  -u, --users [username]          List all users or detailed info about a specific user."
     echo "  -t, --time [start_time] [end_time]  Display activities within a specified time range. If only start_time is provided, shows activities for that day."
-    echo "  -h, --help                   Show this help message and exit."
+    echo "  -h, --help                      Show this help message and exit."
 }
 
 # Logging function
@@ -40,7 +40,6 @@ get_docker_images() {
 # Get detailed information about a specific Docker container
 get_docker_container_info() {
     log_message "Fetching Docker container info for $1"
-    docker ps -a --format "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"
     docker inspect "$1"
 }
 
@@ -97,7 +96,6 @@ get_time_range_activities() {
         return 1
     fi
 
-    # Print activities within the time range
     echo -e "USERNAME\tFROM\tLOGIN TIME\tDURATION\tIP ADDRESS"
     last -F | awk -v start="$start_date" -v end="$end_date" '
     BEGIN {FS=" "; OFS="\t"}
