@@ -118,7 +118,7 @@ get_nginx_info() {
     echo "+-----------------------------+------------------------------+---------------------------+"
 }
 
-# Function to display user activity logs
+# Function to get user information
 get_user_info() {
     if [ -z "$1" ]; then
         echo "Regular users and last login times:"
@@ -143,6 +143,8 @@ get_user_info() {
                 id "$1"
                 echo "Last login:"
                 last "$1" -1 | head -n 1
+                echo "Groups:"
+                id -Gn "$1" | tr ' ' '\n' | awk '{print "- " $1}'
             else
                 echo "This is a system user, not a regular user."
             fi
@@ -151,6 +153,7 @@ get_user_info() {
         fi
     fi
 }
+
 
 # Function to display system logs from a given date range
 get_time_range_info() {
