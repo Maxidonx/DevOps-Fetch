@@ -131,6 +131,7 @@ Display activities within a specified time range.
 devopsfetch -t 2024-07-18 2024-07-22
 devopsfetch -t 2024-07-21
 ```
+#### Note: To add the logs into a file, you can pipe it to a created file in the reposotory using the following code ```devopsfetch -t YYYY-MM-DD > new_file.txt```
 - **-h, --help:**
 
 Display the help message.
